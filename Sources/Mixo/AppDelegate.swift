@@ -2,34 +2,34 @@ import AppKit
 import Combine
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = MixerModel()
     private var statusItem: NSStatusItem!
-    private let popover = NSPopover()
+    private var panel: MixerPanel!
     private var iconObserver: AnyCancellable?
-    private var outsideClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        popover.contentViewController = NSHostingController(rootView: MixerView(model: model))
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
-
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.target = self
-        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.action = #selector(togglePanel)
+
+        panel = MixerPanel(model: model)
+        panel.ignoredFrame = { [weak self] in self?.statusItem.button?.window?.frame ?? .zero }
 
         iconObserver = model.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.updateIcon() }
         updateIcon()
 
-        if CommandLine.arguments.contains("--show") { showPopover() }
+        if CommandLine.arguments.contains("--show") {
+            // Wait for the menu bar icon to get its place, the panel opens under it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.showPanel() }
+        }
     }
 
     /// Opening Mixo again from Finder or Spotlight shows the mixer.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showPopover()
+        showPanel()
         return false
     }
 
@@ -42,32 +42,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Mixo")
     }
 
-    @objc private func togglePopover() {
-        popover.isShown ? popover.performClose(nil) : showPopover()
+    @objc private func togglePanel() {
+        panel.isVisible ? panel.close() : showPanel()
     }
 
-    private func showPopover() {
-        guard let button = statusItem.button else { return }
+    private func showPanel() {
         model.refresh()
-        NSApp.activate()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-
-        // Mixo has no Dock icon, so macOS may not treat it as active and the transient popover
-        // would ignore clicks in other apps. Watch for them ourselves.
-        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            // Clicks on the popover itself can arrive here when Mixo isn't the active app.
-            guard let self, let window = popover.contentViewController?.view.window,
-                  !window.frame.contains(NSEvent.mouseLocation),
-                  !(statusItem.button?.window?.frame.contains(NSEvent.mouseLocation) ?? false) else { return }
-            popover.performClose(nil)
+        let anchor: NSRect
+        if let button = statusItem.button, let window = button.window {
+            anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+        } else {
+            // No icon on screen (e.g. hidden by the notch): open near the top center.
+            let screen = NSScreen.main?.frame ?? .zero
+            anchor = NSRect(x: screen.midX, y: screen.maxY - 30, width: 0, height: 0)
         }
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        if let outsideClickMonitor {
-            NSEvent.removeMonitor(outsideClickMonitor)
-            self.outsideClickMonitor = nil
-        }
+        panel.show(below: anchor)
     }
 }
