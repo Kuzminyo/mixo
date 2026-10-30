@@ -42,7 +42,7 @@ if [ "${1:-}" = "dist" ]; then
     rm -rf dist
     mkdir -p dist
     ditto -c -k --keepParent "$APP" "dist/Mixo-$VERSION.zip"
-    zip -qr "dist/Mixo-$VERSION-source.zip" Package.swift build.sh README.md .gitignore Sources Resources scripts
+    zip -qr "dist/Mixo-$VERSION-source.zip" Package.swift build.sh README.md LICENSE .gitignore Sources Resources scripts
     echo "Packaged:"
     ls -lh dist
 fi
